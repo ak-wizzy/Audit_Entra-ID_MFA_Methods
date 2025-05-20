@@ -1,40 +1,48 @@
-# Connect to Microsoft Graph
-Connect-MgGraph -Scopes "UserAuthenticationMethod.Read.All"
+# Import the Microsoft Graph modules
+Import-Module Microsoft.Graph.Users
+Import-Module Microsoft.Graph.Identity.SignIns
 
-# Load users
-$users = Import-Csv -Path "C:\Path\To\users.csv"
+# Connect to Microsoft Graph with the necessary permissions
+Connect-MgGraph -Scopes "User.Read.All", "UserAuthenticationMethod.Read.All"
 
-# Output log for users with >2 methods
-$outputLog = "C:\Path\To\UsersWithMoreThan2MFAMethods_$(Get-Date -Format 'yyyyMMdd_HHmm').csv"
-$results = @()
+# Specify the path to your CSV file
+$csvPath = "C:\Path\To\users.csv"
 
+# Specify the path to the output CSV file
+$outputCsvPath = "C:\Path\To\_$(Get-Date -Format 'yyyyMMdd_HHmm').csv"
+
+# Import the CSV file
+$users = Import-Csv -Path $csvPath
+
+# Create an array to store the output
+$output = @()
+
+# Loop through each user in the CSV file
 foreach ($user in $users) {
+    $upn = $user.UserPrincipalName
+
     try {
-        $methods = Get-MgUserAuthenticationMethod -UserId $user.UserPrincipalName
+        # Get the user's registered authentication methods
+        $authMethods = Get-MgUserAuthenticationMethod -UserId $upn
 
-        $methodCount = $methods.Count
-
-        if ($methodCount -gt 2) {
-            Write-Host "$($user.UserPrincipalName) has $methodCount MFA methods" -ForegroundColor Yellow
-            $results += [PSCustomObject]@{
-                UserPrincipalName = $user.UserPrincipalName
-                MethodCount       = $methodCount
-                Methods           = ($methods.ODataType -join "; ")
+        # Check if the user has more than 2 authentication methods
+        if ($authMethods.Count -gt 2) {
+            # Loop through each authentication method
+            foreach ($authMethod in $authMethods) {
+                $output += [PSCustomObject]@{
+                    UserPrincipalName = $upn
+                    MethodType        = $authMethod.AdditionalProperties["@odata.type"]
+                    MethodId          = $authMethod.Id
+                }
             }
         }
-        else {
-            Write-Host "$($user.UserPrincipalName) has $methodCount methods" -ForegroundColor Green
-        }
-    }
-    catch {
-        Write-Host "Error retrieving methods for $($user.UserPrincipalName): $_" -ForegroundColor Red
+    } catch {
+        Write-Warning "User $upn not found or no permissions to access"
     }
 }
 
-# Export the results to CSV
-if ($results.Count -gt 0) {
-    $results | Export-Csv -Path $outputLog -NoTypeInformation
-    Write-Host "Results saved to: $outputLog" -ForegroundColor Cyan
-} else {
-    Write-Host "No users with more than 2 methods found." -ForegroundColor Green
-}
+# Export the output to a CSV file
+$output | Export-Csv -Path $outputCsvPath -NoTypeInformation
+
+# Disconnect from Microsoft Graph
+Disconnect-MgGraph
